@@ -19,6 +19,8 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"sort"
+	"strings"
 	"syscall"
 
 	stdlog "log"
@@ -53,7 +55,22 @@ func main() {
 
 	flag.Parse()
 
-	var values map[string]string
+	var values = map[string]string{}
+	if !*clean {
+		env = append(os.Environ(), env...)
+	}
+
+	for _, e := range env {
+		off := strings.IndexByte(e, '=')
+		if off == -1 {
+			values[e] = ""
+		} else {
+			values[e[:off]] = e[off+1:]
+		}
+	}
+
+	env = env[:0]
+
 	var err error
 	for _, fp := range *inputs {
 		var b []byte
@@ -80,9 +97,7 @@ func main() {
 		env = append(env, pair)
 	}
 
-	if !*clean {
-		env = append(os.Environ(), env...)
-	}
+	sort.Strings(env)
 
 	argv := flag.Args()
 	if len(argv) == 0 {
