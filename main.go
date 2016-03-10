@@ -4,7 +4,7 @@
 //
 // For example:
 //
-//   $ binit -e thing.var=value -f config.ini -i env
+//   $ binit -e thing.var=value -f config.ini -i sh -c export
 //   export section.key="value"
 //   export section.with-newlines="value
 //   with
