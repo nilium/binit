@@ -51,8 +51,10 @@ func main() {
 	dropRepeats := flag.Bool("n", false, "Whether to pick only the last-set value for an environment value.")
 	sep := flag.String("s", " ", "The string `separator` inserted between multi-value keys. May include Go escape characters if quoted according to Go.")
 	clean := flag.Bool("i", false, "Whether to omit current environment variables from the exec.")
+	var imports = new(Strings)
 	var inputs = new(Strings)
 
+	flag.Var(imports, "m", "Import a specific variable from the environment. Implies -i.")
 	flag.Var((*Strings)(&env), "e", "Set an environment variable (`K=V`).")
 	flag.Var(inputs, "f", "INI `file`s to load into the environment. (Pass - to read from standard input.)")
 
@@ -75,6 +77,19 @@ func main() {
 	}
 
 	var values = map[string][]string{}
+
+	if len(*imports) > 0 {
+		*clean = true
+	}
+
+	for _, m := range *imports {
+		if _, ok := values[m]; ok {
+			continue
+		} else if v := os.Getenv(m); v != "" {
+			values[m] = []string{v}
+		}
+	}
+
 	if !*clean {
 		env = append(os.Environ(), env...)
 	}
