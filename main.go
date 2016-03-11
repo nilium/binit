@@ -14,11 +14,13 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +40,43 @@ func (s *Strings) String() string {
 func (s *Strings) Set(str string) error {
 	*s = append(*s, str)
 	return nil
+}
+
+// compileWildcard converts a splat string (a string containing either ? or * to indicate a match-one or match-zero-to-N
+// wildcard, respectively) to a regular expression for string matching. This is the rough equivalent of taking
+// instructions to dig a hole and starting a mine leading down to the center of the earth, but the alternative was using
+// my glob package, and I kind of want to restrict the number of outside packages, even my own, for binit.
+func compileWildcard(splat string) (*regexp.Regexp, error) {
+	var b bytes.Buffer
+	b.Grow(len(splat) + 2)
+	escape := false
+	b.WriteByte('^')
+	for _, r := range splat {
+		if r == '\\' {
+			escape = true
+			continue
+		}
+
+		if escape {
+			b.WriteString(regexp.QuoteMeta(string(r)))
+		} else if r == '*' {
+			b.WriteString(".*")
+		} else if r == '?' {
+			b.WriteString(".")
+		} else {
+			b.WriteString(regexp.QuoteMeta(string(r)))
+		}
+		escape = false
+	}
+
+	if escape {
+		b.WriteString(`\\`)
+	}
+
+	b.WriteByte('$')
+
+	pat := b.String()
+	return regexp.Compile(pat)
 }
 
 func log(args ...interface{}) { stdlog.Print(args...) }
@@ -78,20 +117,50 @@ func main() {
 
 	var values = map[string][]string{}
 
-	if len(*imports) > 0 {
-		*clean = true
+	// Load process environment
+	osenv := os.Environ()
+	current := map[string]string{}
+	for _, pair := range osenv {
+		idx := strings.IndexByte(pair, '=')
+		if idx == -1 {
+			current[pair] = ""
+		} else {
+			current[pair[:idx]] = pair[idx+1:]
+		}
 	}
 
+	// Merge imported environment values
 	for _, m := range *imports {
+		if strings.ContainsAny(m, "*?") {
+			pat, err := compileWildcard(m)
+			if err != nil {
+				log("unable to compile pattern-like import", strconv.Quote(m), ": ", err)
+				goto literal
+			}
+
+			for k, v := range current {
+				if _, ok := values[k]; ok || !pat.MatchString(k) {
+					continue
+				}
+				values[k] = []string{v}
+			}
+
+			continue
+		}
+
+	literal: // Interpret the import string literally
 		if _, ok := values[m]; ok {
 			continue
-		} else if v := os.Getenv(m); v != "" {
+		} else if v, ok := current[m]; ok {
 			values[m] = []string{v}
 		}
 	}
 
-	if !*clean {
-		env = append(os.Environ(), env...)
+	// Otherwise import process environment en masse
+	if !*clean && len(*imports) == 0 {
+		for k, v := range current {
+			values[k] = []string{v}
+		}
 	}
 
 	for _, e := range env {
