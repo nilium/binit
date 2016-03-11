@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -47,6 +48,8 @@ func main() {
 
 	var env []string
 
+	dropRepeats := flag.Bool("n", false, "Whether to pick only the last-set value for an environment value.")
+	sep := flag.String("s", " ", "The string `separator` inserted between multi-value keys. May include Go escape characters if quoted according to Go.")
 	clean := flag.Bool("i", false, "Whether to omit current environment variables from the exec.")
 	var inputs = new(Strings)
 
@@ -55,7 +58,23 @@ func main() {
 
 	flag.Parse()
 
-	var values = map[string]string{}
+	if s := *sep; len(s) > 0 {
+		var err error
+		// It's only going to be a valid Go quote if it starts with a character in ASCII range, so no need to worry about decoding a rune here.
+		switch s[0] {
+		case '`', '\'', '"':
+			s, err = strconv.Unquote(s)
+		default:
+			s, err = strconv.Unquote(`"` + strings.Replace(s, `"`, `\"`, -1) + `"`)
+		}
+		if err == nil {
+			*sep = s
+		} else {
+			log("unable to unquote separator: ", strconv.Quote(*sep))
+		}
+	}
+
+	var values = map[string][]string{}
 	if !*clean {
 		env = append(os.Environ(), env...)
 	}
@@ -63,9 +82,10 @@ func main() {
 	for _, e := range env {
 		off := strings.IndexByte(e, '=')
 		if off == -1 {
-			values[e] = ""
+			values[e] = append(values[e], "")
 		} else {
-			values[e[:off]] = e[off+1:]
+			k, v := e[:off], e[off+1:]
+			values[k] = append(values[k], v)
 		}
 	}
 
@@ -93,7 +113,12 @@ func main() {
 	}
 
 	for k, v := range values {
-		pair := k + "=" + v
+		var pair string
+		if *dropRepeats {
+			pair = k + "=" + v[len(v)-1]
+		} else {
+			pair = k + "=" + strings.Join(v, *sep)
+		}
 		env = append(env, pair)
 	}
 
