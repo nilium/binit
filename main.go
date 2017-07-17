@@ -26,9 +26,9 @@ import (
 	"strings"
 	"syscall"
 
-	stdlog "log"
+	ini "go.spiff.io/go-ini"
 
-	"go.spiff.io/go-ini"
+	stdlog "log"
 )
 
 type Strings []string
@@ -88,6 +88,8 @@ func main() {
 	var env []string
 
 	dropRepeats := flag.Bool("n", false, "Whether to pick only the last-set value for an environment value.")
+	casingFlag := flag.String("c", "s", "Case transformations to apply to keys. (c=case-sensitive; u=uppercase; d=lowercase)")
+	ksep := flag.String("S", ".", "The string `separator` inserted between group names and keys.")
 	sep := flag.String("s", " ", "The string `separator` inserted between multi-value keys. May include Go escape characters if quoted according to Go.")
 	clean := flag.Bool("i", false, "Whether to omit current environment variables from the exec.")
 	var imports = new(Strings)
@@ -175,6 +177,18 @@ func main() {
 
 	env = env[:0]
 
+	casing := ini.CaseSensitive
+	switch strings.ToLower(*casingFlag) {
+	case "", "s", "cs", "cased", "case-sensitive":
+		// default
+	case "u", "up", "upper":
+		casing = ini.UpperCase
+	case "l", "d", "down", "lower":
+		casing = ini.LowerCase
+	default:
+		log("invalid case flag: ", strconv.Quote(*casingFlag), "; using default of \"case-sensitive\"")
+	}
+
 	var err error
 	for _, fp := range *inputs {
 		var b []byte
@@ -190,7 +204,13 @@ func main() {
 			continue
 		}
 
-		values, err = ini.ReadINI(b, values)
+		dec := ini.Reader{
+			Separator: *ksep,
+			Casing:    casing,
+			True:      ini.True,
+		}
+		err = dec.Read(bytes.NewReader(b), ini.Values(values))
+		//values, err = ini.ReadINI(b, values)
 		if err != nil {
 			log("error parsing INI ", fp, ": ", err)
 		}
