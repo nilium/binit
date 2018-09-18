@@ -85,10 +85,12 @@ func main() {
 	stdlog.SetPrefix("binit: ")
 	stdlog.SetFlags(0)
 
-	var env []string
+	var assigned []string
 
 	dropRepeats := flag.Bool("n", false, "Whether to pick only the last-set value for an environment value.")
+	keepFirst := flag.Bool("N", false, "Keep first values instead of last (implies -n).")
 	casingFlag := flag.String("c", "s", "Case transformations to apply to keys. (c=case-sensitive; u=uppercase; d=lowercase)")
+	configLast := flag.Bool("L", false, "Gives config file values precedence over values from the environment.")
 	ksep := flag.String("S", ".", "The string `separator` inserted between group names and keys.")
 	sep := flag.String("s", " ", "The string `separator` inserted between multi-value keys. May include Go escape characters if quoted according to Go.")
 	clean := flag.Bool("i", false, "Whether to omit current environment variables from the exec.")
@@ -96,10 +98,14 @@ func main() {
 	var inputs = new(Strings)
 
 	flag.Var(imports, "m", "Import a specific variable from the environment. Implies -i.")
-	flag.Var((*Strings)(&env), "e", "Set an environment variable (`K=V`).")
+	flag.Var((*Strings)(&assigned), "e", "Set an environment variable (`K=V`).")
 	flag.Var(inputs, "f", "INI `file`s to load into the environment. (Pass - to read from standard input.)")
 
 	flag.Parse()
+
+	if *keepFirst {
+		*dropRepeats = true
+	}
 
 	if s := *sep; len(s) > 0 {
 		var err error
@@ -120,112 +126,38 @@ func main() {
 	var values = map[string][]string{}
 
 	// Load process environment
-	osenv := os.Environ()
-	current := map[string]string{}
-	for _, pair := range osenv {
-		idx := strings.IndexByte(pair, '=')
-		if idx == -1 {
-			current[pair] = ""
-		} else {
-			current[pair[:idx]] = pair[idx+1:]
-		}
-	}
+	current := parseEnv(os.Environ())
 
 	// Merge imported environment values
-	for _, m := range *imports {
-		if strings.ContainsAny(m, "*?") {
-			pat, err := compileWildcard(m)
-			if err != nil {
-				log("unable to compile pattern-like import", strconv.Quote(m), ": ", err)
-				goto literal
-			}
 
-			for k, v := range current {
-				if _, ok := values[k]; ok || !pat.MatchString(k) {
-					continue
-				}
-				values[k] = []string{v}
-			}
-
-			continue
-		}
-
-	literal: // Interpret the import string literally
-		if _, ok := values[m]; ok {
-			continue
-		} else if v, ok := current[m]; ok {
-			values[m] = []string{v}
-		}
-	}
-
-	// Otherwise import process environment en masse
-	if !*clean && len(*imports) == 0 {
-		for k, v := range current {
-			values[k] = []string{v}
-		}
-	}
-
-	for _, e := range env {
-		off := strings.IndexByte(e, '=')
-		if off == -1 {
-			values[e] = append(values[e], "")
+	copyCurrent := !*clean && len(*imports) == 0
+	importValues := func() {
+		copyValues(values, parseEnv(assigned))
+		if copyCurrent {
+			copyValues(values, current)
 		} else {
-			k, v := e[:off], e[off+1:]
-			values[k] = append(values[k], v)
+			copyImports(values, current, *imports)
 		}
 	}
 
-	env = env[:0]
-
-	casing := ini.CaseSensitive
-	switch strings.ToLower(*casingFlag) {
-	case "", "s", "cs", "cased", "case-sensitive":
-		// default
-	case "u", "up", "upper":
-		casing = ini.UpperCase
-	case "l", "d", "down", "lower":
-		casing = ini.LowerCase
-	default:
-		log("invalid case flag: ", strconv.Quote(*casingFlag), "; using default of \"case-sensitive\"")
+	if !*configLast { // Append environment before loading config files
+		importValues()
 	}
 
-	var err error
-	for _, fp := range *inputs {
-		var b []byte
-
-		if fp == "-" {
-			b, err = ioutil.ReadAll(os.Stdin)
-		} else {
-			b, err = ioutil.ReadFile(fp)
-		}
-
-		if err != nil {
-			log("error reading <", fp, ">:", err)
-			continue
-		}
-
-		dec := ini.Reader{
-			Separator: *ksep,
-			Casing:    casing,
-			True:      ini.True,
-		}
-		err = dec.Read(bytes.NewReader(b), ini.Values(values))
-		//values, err = ini.ReadINI(b, values)
-		if err != nil {
-			log("error parsing INI ", fp, ": ", err)
-		}
+	dec := ini.Reader{
+		Separator: *ksep,
+		Casing:    parseCasing(*casingFlag),
+		True:      ini.True,
+	}
+	for _, path := range *inputs {
+		importConfigFile(values, path, &dec)
 	}
 
-	for k, v := range values {
-		var pair string
-		if *dropRepeats {
-			pair = k + "=" + v[len(v)-1]
-		} else {
-			pair = k + "=" + strings.Join(v, *sep)
-		}
-		env = append(env, pair)
+	if *configLast { // Append environment after loading config files
+		importValues()
 	}
 
+	env := compileEnv(values, *dropRepeats, *keepFirst, *sep)
 	sort.Strings(env)
 
 	argv := flag.Args()
@@ -251,4 +183,104 @@ func main() {
 
 	log("exec failed, process still running")
 	os.Exit(1)
+}
+
+func compileEnv(src map[string][]string, dropRepeats, keepFirst bool, sep string) []string {
+	env := make([]string, 0, len(src))
+	for k, v := range src {
+		var pair string
+		if dropRepeats {
+			keptIndex := 0
+			if !keepFirst {
+				keptIndex = len(v) - 1
+			}
+			pair = k + "=" + v[keptIndex]
+		} else {
+			pair = k + "=" + strings.Join(v, sep)
+		}
+		env = append(env, pair)
+	}
+	return env
+}
+
+func copyImports(dst map[string][]string, src map[string]string, imports Strings) {
+	for _, m := range imports {
+		if !strings.ContainsAny(m, "*?") {
+			copyLiteral(dst, src, m)
+			continue
+		}
+
+		pat, err := compileWildcard(m)
+		if err != nil {
+			log("unable to compile pattern-like import", strconv.Quote(m), ": ", err)
+			copyLiteral(dst, src, m)
+			continue
+		}
+
+		for k, v := range src {
+			if _, ok := dst[k]; ok || !pat.MatchString(k) {
+				continue
+			}
+			dst[k] = []string{v}
+		}
+	}
+}
+
+func copyLiteral(dst map[string][]string, src map[string]string, name string) {
+	if v, ok := src[name]; ok {
+		dst[name] = append(dst[name], v)
+	}
+}
+
+func copyValues(dst map[string][]string, src map[string]string) {
+	for k, v := range src {
+		dst[k] = append(dst[k], v)
+	}
+}
+
+func parseEnv(environ []string) map[string]string {
+	env := map[string]string{}
+	for _, pair := range environ {
+		idx := strings.IndexByte(pair, '=')
+		if idx == -1 {
+			env[pair] = ""
+		} else {
+			env[pair[:idx]] = pair[idx+1:]
+		}
+	}
+	return env
+}
+
+func parseCasing(opt string) ini.KeyCase {
+	switch strings.ToLower(opt) {
+	case "", "s", "cs", "cased", "case-sensitive":
+	case "u", "up", "upper":
+		return ini.UpperCase
+	case "l", "d", "down", "lower":
+		return ini.LowerCase
+	default:
+		log("invalid case flag: ", strconv.Quote(opt), "; using default of \"case-sensitive\"")
+	}
+	return ini.CaseSensitive
+}
+
+func importConfigFile(dst map[string][]string, path string, dec *ini.Reader) {
+	var err error
+	var b []byte
+
+	if path == "-" {
+		b, err = ioutil.ReadAll(os.Stdin)
+	} else {
+		b, err = ioutil.ReadFile(path)
+	}
+
+	if err != nil {
+		log("error reading <", path, ">:", err)
+		return
+	}
+
+	err = dec.Read(bytes.NewReader(b), ini.Values(dst))
+	if err != nil {
+		log("error parsing INI ", path, ": ", err)
+	}
 }
