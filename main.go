@@ -132,7 +132,6 @@ func main() {
 
 	copyCurrent := !*clean && len(*imports) == 0
 	importValues := func() {
-		copyValues(values, parseEnv(assigned))
 		if copyCurrent {
 			copyValues(values, current)
 		} else {
@@ -142,6 +141,7 @@ func main() {
 
 	if !*configLast { // Append environment before loading config files
 		importValues()
+		copyValues(values, parseEnv(assigned))
 	}
 
 	dec := ini.Reader{
@@ -154,6 +154,7 @@ func main() {
 	}
 
 	if *configLast { // Append environment after loading config files
+		copyValues(values, parseEnv(assigned))
 		importValues()
 	}
 

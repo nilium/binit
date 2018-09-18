@@ -85,11 +85,9 @@ Implies *-n*.
 	Without a _CMD_, binit will print a list of all environment variables
 	it would pass to a _CMD_.
 
-`binit -f config.ini -n `::
-  export section.key="value"
-  export section.with-newlines="value
-  with
-  newlines"
-  export thing.var="value"
+`binit -f config.ini -N some-service`::
+	Run `some-service` after loading env vars from config.ini.
+	With *-N*, the env vars in the environment take precedence over those
+	of the config file.
 
 
