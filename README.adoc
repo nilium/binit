@@ -1,0 +1,95 @@
+= binit(1)
+Noel Cower
+v0.1.0
+:doctype: manpage
+:manmanual: BINIT
+:mansource: BINIT
+:man-linkstyle: pass:[blue R < >]
+
+== Name
+
+binit - execs a program with environment variables loaded from INI files
+
+
+== Synopsis
+
+*binit* [_OPTION_]... [_CMD_]...
+
+
+== Description
+
+binit is an `env`-like tool to exec programs with environment variables loaded
+from INI files (similar to `chpst -e dir` as well in that regard).
+
+INI files are loaded by passing a path to a file with the *-f*=_FILE_ option.
+
+
+== Options
+
+*-c*=_{c|u|d}_::
+	Case transformations to apply to keys.
++
+* _c_ - perserve variable names' case.
+* _u_ - uppercase all variable names.
+* _d_ - lowercase all variable names.
+
+*-e*=_NAME=VALUE_::
+	Set the environment variable _NAME_ to _VALUE_.
+	May be set multiple times to set multiple variables.
+
+*-f*=_FILE_::
+	INI files to load into the environment.
+	Pass '-' (hyphen) for _FILE_ to read from standard input.
+	May be set multiple times to load multiple files.
+
+*-L*::
+	Config file values are appended to environment config instead of
+	prepended.
+	May be combined with *-n* and *-N* to double-negate precedence.
+
+*-i*::
+	Whether to omit current environment variables from the exec.
+
+*-m*=_NAME_::
+	Import a specific variable from the environment.
+	May include _*_ for wildcard matches.
+	May be set multiple times to import multiple variables.
++
+Implies *-i*.
+
+*-n*::
+	Preserve only the last-set value for an environment value.
+	If two values are encountered, instead of merging them using the
+	*-s* separator, it will discard all but the last value seen.
+
+*-N*::
+	Preserve only the first-set value for an environment value when *-n* is
+	set.
++
+Implies *-n*.
+
+*-S*=_SEPARATOR_::
+	The string separator inserted between group names and keys in INI files.
+	Defaults to "." (dot or period).
+
+*-s*=_SEPARATOR_::
+	The string separator inserted between multi-value keys.
+	May include Go escape characters if quoted according to Go.
+	Defaults to " " (space).
+
+
+== Examples
+
+
+`binit -e thing.var=value -f config.ini -i`::
+	Without a _CMD_, binit will print a list of all environment variables
+	it would pass to a _CMD_.
+
+`binit -f config.ini -n `::
+  export section.key="value"
+  export section.with-newlines="value
+  with
+  newlines"
+  export thing.var="value"
+
+

@@ -1,0 +1,8 @@
+.DS_Store
+.*.sw*
+~*
+
+README.html
+binit
+binit.1
+vendor
