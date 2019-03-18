@@ -29,7 +29,7 @@ INI files are loaded by passing a path to a file with the *-f*=_FILE_ option.
 *-c*=_{c|u|d}_::
 	Case transformations to apply to keys.
 +
-* _c_ - perserve variable names' case.
+* _c_ - preserve variable names' case.
 * _u_ - uppercase all variable names.
 * _d_ - lowercase all variable names.
 
